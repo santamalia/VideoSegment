@@ -2,17 +2,6 @@
 #include "disjoint-set.h"
 #include "mouse.h"
 
-
-//画像読み込み関数
-/*
-void loadImg(){
-    input  = imread(img, CV_LOAD_IMAGE_COLOR);
-    width = input.cols;
-    height = input.rows;
-    cout << "input: " << width << "x" << height << endl;
-}
-*/
-
 //エッジリストへの追加
 void AddEdges(int j, int i, int k, float w){
     edges[num_edge].w = w;
@@ -20,11 +9,6 @@ void AddEdges(int j, int i, int k, float w){
     edges[num_edge].b = (j + neigh[k][1]) * width + i + neigh[k][0];
     num_edge++;
 }
-
-inline int isIn(int x, int y, int w, int h){
-    return (x>=0 && x<w && y>=0 && y<h);
-}
-
 //グラフ作成(重み付け)関数
 void makeGraph(){
     edges=(edge*)malloc(sizeof(edge) * height * width * 4); //エッジのメモリ割当
@@ -47,8 +31,6 @@ void makeGraph(){
                     uchar dg = green - n_green;
                     uchar db = blue - n_blue;
                     
-                    //Edge.at<Vec4f>(j,i)[k] = sqrt(dr*dr + dg*dg + db*db);
-                    //cout << "i,j,k = " << i << j << k << endl;
                     AddEdges(j,i,k,sqrt(dr*dr + dg*dg + db*db));
                 }
             }
@@ -56,8 +38,7 @@ void makeGraph(){
     }
 }
 
-int compEdge(const void *a, const void *b)
-{
+int compEdge(const void *a, const void *b){
     return (int)(((edge*)b)->w - ((edge*)a)->w);
 }
 
@@ -74,15 +55,13 @@ rgb random_rgb(){
 
 //グラフ分割関数
 universe *segmentGraph(int num_vertices, float c){
-    //qsort(EL,num_edge,sizeof(EdgeList),compEL); //エッジの重みで降順にソート
     qsort(edges,num_edge,sizeof(edge),compEdge);
     universe *u = new universe(num_vertices);
     float *threshold = new float[num_vertices];
     for(int i=0; i<num_vertices; i++) threshold[i] = THRESHOLD(1,c); //閾値関数を初期化
     for(int i=0; i<num_edge; i++){
         edge *pedge = &edges[i];
-    
-        // components conected by this edge
+
         int a = u->find(pedge->a);
         int b = u->find(pedge->b);
         if (a != b) {
@@ -106,7 +85,6 @@ Mat segmentImage(int num_vertices, universe *u, int min_size, int *num_ccs){
         if ((a != b) && ((u->size(a) < min_size) || (u->size(b) < min_size)))
             u->join(a, b);
     }
-    //delete [] edges;
     *num_ccs = u->num_sets();
 
     //色ぬり
@@ -124,23 +102,22 @@ Mat segmentImage(int num_vertices, universe *u, int min_size, int *num_ccs){
     //エッジを黒く
     for(int i=0; i<num_edge; i++){
         if(u->find(edges[i].a) != u->find(edges[i].b)){
-/*            int ax = edges[i].a % width;
+            int ax = edges[i].a % width;
             int ay = edges[i].a / width;
-*/
             int bx = edges[i].b % width;
             int by = edges[i].b / width;
-            if(/*isIn(ax,ay,width,height) && */isIn(bx,by,width,height)){
-/*                output.at<Vec3b>(ay,ax)[0] = 0;
+            if(isIn(ax,ay,width,height) && isIn(bx,by,width,height)){
+                output.at<Vec3b>(ay,ax)[0] = 0;
                 output.at<Vec3b>(ay,ax)[1] = 0;
                 output.at<Vec3b>(ay,ax)[2] = 0;
-*/
+                /*
                 output.at<Vec3b>(by,bx)[0] = 0;
                 output.at<Vec3b>(by,bx)[1] = 0;
                 output.at<Vec3b>(by,bx)[2] = 0;
+                */
             }
         }
     }
-
     delete [] edges;
 
     return output;
@@ -148,22 +125,17 @@ Mat segmentImage(int num_vertices, universe *u, int min_size, int *num_ccs){
 
 //引数 sigma k min 
 int main(int argc, const char* argv[]){
-    if (argc != 4) {
-        fprintf(stderr, "usage: %s sigma k min \n", argv[0]);
-        return 1;
-    }
+    //float sigma = atof(argv[1]); //平滑化の度合い(2017/03/30現在未使用)
+    //float k = atof(argv[2]); //しきい値関数のパラメータ
+    //int min_size = atoi(argv[3]); //最小分割数
 
-    float sigma = atof(argv[1]); //平滑化の度合い
-    float k = atof(argv[2]); //しきい値関数のパラメータ
-    int min_size = atoi(argv[3]); //最小分割数
+    float k = 5.0, pre_k;
+    int min_size = 250, pre_min_size;
+    int num_ccs;
 
-    int num_ccs; //コンポーネントの数
-    int prev = 0;
-    int frame_num = 0;
     int bar_value;
-
-    //画像読み込み
-    //loadImg();
+    int k_value;
+    int min_size_value;
 
     //映像読み込み
     //webカメラからの映像を入力とする場合
@@ -174,63 +146,110 @@ int main(int argc, const char* argv[]){
 
     width = cap.get(CV_CAP_PROP_FRAME_WIDTH);
     height = cap.get(CV_CAP_PROP_FRAME_HEIGHT);
+    float fps = cap.get(CV_CAP_PROP_FPS);
+
+    //書き出し用
+    VideoWriter writer("../../movie/output/OUTPUT.avi", VideoWriter::fourcc('D', 'I', 'V', '3'), fps, Size(height, width));
+    if (!writer.isOpened()) return -1;
+
     cout << "入力映像サイズ:" << width << "x" << height << endl;
+    cout << "フレームレート:" << fps << endl;
     frame.create(height,width,CV_8UC3);
-    for (int i=0; i<BUF_N; i++) buf[i].create(height,width,CV_8UC3);
+    for (int i=0; i<BUF_N; i++) {
+        f_buf[i].create(height,width,CV_8UC3);
+        o_buf[i].create(height,width,CV_8UC3);
+    }
     //ボタン画像読み込み
-    Mat button = imread("buttons/BUTTON.JPG", 1);
-    Mat button_2 = imread("buttons//BUTTON_2.JPG", 1);
-    Mat button_2a = imread("buttons/./BUTTON_2a.JPG", 1);
+    Mat button_a = imread("buttons/button_a.png", 1);
+    Mat button_b = imread("buttons/button_b.png", 1);
+    Mat button_c = imread("buttons/button_c.png", 1);
+    Mat button_d = imread("buttons/button_d.png", 1);
     //ボタンサイズを適切に
     double resize_y = (double)height / (double)480;
-    resize(button, button, Size(), 1, resize_y);
-    resize(button_2, button_2, Size(), 1, resize_y);
-    resize(button_2a, button_2a, Size(), 1, resize_y);
+    resize(button_a, button_a, Size(), 1, resize_y);
+    resize(button_b, button_b, Size(), 1, resize_y);
+    resize(button_c, button_c, Size(), 1, resize_y);
+    resize(button_d, button_d, Size(), 1, resize_y);
     namedWindow("output", WINDOW_AUTOSIZE);
     setMouseCallback("output", onMouse, 0);
-    createTrackbar("OUTPUT", "output", &bar_value, BUF_N-1);
+    createTrackbar("frame", "output", &bar_value, BUF_N-1);
+    createTrackbar("k","output", &k_value, K_MAX-1);
+    createTrackbar("min_size","output", &min_size_value, MIN_SIZE_MAX-1);
+
+    setTrackbarPos("k", "output", k*100);
+    setTrackbarPos("min_size", "output", min_size);
 
     while(1){
-        if(CAP == 0){
+        if(CAP){ //キャプチャされているとき
+            frame_num = MAX(0, getTrackbarPos("frame", "output")-1);
+            k = getTrackbarPos("k", "output") / (float)100.0;
+            min_size = getTrackbarPos("min_size", "output");
+            f_buf[frame_num].copyTo(frame);
+        } else { //キャプチャされていないとき
             cap >> frame;
             if(frame.empty()){
                 cap.set(CV_CAP_PROP_POS_FRAMES,0.0);
                 continue;
             }
-        } else {
-            prev = frame_num;
-            frame_num = MAX(0, getTrackbarPos("OUTPUT", "output")-1);
+            frame.copyTo(f_buf[frame_num]);
         }
+
         num_edge = 0;
 
-        if(frame_num != prev){
-            //cvSmooth(frame, frame, CV_BILATERAL, 11, 11, 50, 100);
-            //bilateralFilter(frame, frame, 10, 100, 10, BORDER_DEFAULT);
-            //GaussianBlur(frame, frame, Size(7,5), 8, 6);
-            medianBlur(frame, frame, 3);
-            makeGraph();
-            universe *u = segmentGraph(width*height, k);
-            output = segmentImage(width*height, u, min_size, &num_ccs);
-            output.copyTo(buf[frame_num]);
-        } 
-        else if(frame_num == prev) {
-            if(frame_num != 0)output = buf[frame_num-1];
-            else output = frame;
+        if(SEG){ //分割モードで
+            //キャプチャされてないまたはパラメータが変更された時
+            if(!CAP || (fabsf(k - pre_k)) > EPSILON || (min_size != pre_min_size)){
+                medianBlur(frame, frame, 3);
+                makeGraph();
+                universe *u = segmentGraph(width*height, k);
+                output = segmentImage(width*height, u, min_size, &num_ccs);
+                output.copyTo(o_buf[frame_num]);
+            }
+            //キャプチャされているとき
+            else if(CAP){
+                o_buf[frame_num].copyTo(output);
+            }
+        } else { //分割モードでないとき
+            output = f_buf[frame_num];
         }
 
-        hconcat(output, button, output);//ボタン画像と入力映像を横に連結
-        if(CAP == 0) hconcat(output,button_2,output);//ボタン画像2と入力映像を横に連結
-        else         hconcat(output,button_2a,output);//ボタン画像2と入力映像を横に連結
+        //ボタン画像を連結
+        if(CAP){ //キャプチャされていて
+            if(SEG) hconcat(output,button_a,output); //セグメントモードのとき
+            else    hconcat(output,button_b,output); //セグメントモードでないとき
+        } else { //キャプチャされておらず
+            if(SEG) hconcat(output,button_c,output); //セグメントモードのとき
+            else    hconcat(output,button_d,output); //セグメントモードでないとき
+        }
 
+        //出力
         imshow("output", output);
-//      cout << frame_num << endl;
-        if(CAP == 0){
-            prev = frame_num;
+
+        //書き出し
+        if(WRT){
+            writer << output;
+            if(frame_num == 50) return 0;
+        }
+
+        if(!CAP){
             frame_num++;
             if(frame_num == BUF_N) frame_num = 0;
-            setTrackbarPos("OUTPUT", "output", frame_num);
+            setTrackbarPos("frame", "output", frame_num);
         }
+
+        //前のパラメータを保存
+        pre_k = k;
+        pre_min_size = min_size;
+
         //Escを押すと終了
-        if(waitKey(1) == 0x1b) return 0;
+        if(waitKey(1) == 0x1b){
+            destroyWindow("output");
+            return 0;
+        }
     }
 }
+
+
+
+
+
